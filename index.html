@@ -3,21 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>CRISPR in Action 3D</title>
+  <title>Complete CRISPR Action 3D</title>
   <style>
-    body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #050814; font-family: sans-serif; }
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030611; font-family: sans-serif; }
     #canvas-container { width: 100vw; height: 100vh; }
     #ui {
-      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-      z-index: 10; text-align: center; width: 90%; max-width: 400px;
+      position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%);
+      z-index: 10; text-align: center; width: 90%; max-width: 420px;
+    }
+    #status {
+      color: #00e5ff; font-weight: bold; margin-bottom: 12px; font-size: 14px;
+      letter-spacing: 1px; text-shadow: 0 0 8px rgba(0,229,255,0.6);
     }
     button {
-      background: #00e5ff; border: none; color: #050814; padding: 14px 28px;
-      font-size: 16px; font-weight: bold; border-radius: 30px; cursor: pointer;
+      background: #00e5ff; border: none; color: #030611; padding: 14px 28px;
+      font-size: 15px; font-weight: bold; border-radius: 30px; cursor: pointer;
       box-shadow: 0 0 15px rgba(0, 229, 255, 0.4); transition: 0.2s;
     }
     button:active { transform: scale(0.95); }
-    #status { color: #fff; margin-bottom: 10px; font-size: 14px; letter-spacing: 1px; }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -26,8 +29,8 @@
 
   <div id="canvas-container"></div>
   <div id="ui">
-    <div id="status">STATUS: TARGETING DNA...</div>
-    <button id="action-btn" onclick="triggerCut()">CUT DNA</button>
+    <div id="status">STEP 1: CAS9 SCANNING &amp; BINDING</div>
+    <button id="action-btn" onclick="nextPhase()">1. CUT TARGET DNA</button>
   </div>
 
   <script>
@@ -35,7 +38,7 @@
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 25);
+    camera.position.set(0, 0, 28);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -45,81 +48,134 @@
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
 
-    // Lighting
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const pointLight = new THREE.PointLight(0x00e5ff, 1.5, 100);
-    pointLight.position.set(10, 10, 10);
-    scene.add(pointLight);
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const mainLight = new THREE.PointLight(0x00e5ff, 2, 100);
+    mainLight.position.set(10, 10, 10);
+    scene.add(mainLight);
 
-    // 2. Build DNA Helix
-    const dnaGroup = new THREE.Group();
+    // 2. DNA Construction Parameters
+    const numPairs = 32;
+    const helixRadius = 3;
+    const helixHeight = 32;
     const leftStrand = [], rightStrand = [], rungs = [];
-    const numPairs = 30, helixRadius = 3, helixHeight = 30;
 
     const blueMat = new THREE.MeshPhongMaterial({ color: 0x0088ff });
     const cyanMat = new THREE.MeshPhongMaterial({ color: 0x00e5ff });
-    const redMat = new THREE.MeshPhongMaterial({ color: 0xff0055 });
+    const cutMat = new THREE.MeshPhongMaterial({ color: 0xff0055 });
+    const repairMat = new THREE.MeshPhongMaterial({ color: 0x00ff66 }); // Green repair patch
+
+    const dnaGroup = new THREE.Group();
 
     for (let i = 0; i < numPairs; i++) {
       const y = (i / numPairs) * helixHeight - helixHeight / 2;
-      const angle = i * 0.5;
+      const angle = i * 0.45;
 
-      const p1 = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), blueMat);
+      // Backbone spheres
+      const p1 = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), blueMat);
       p1.position.set(Math.cos(angle) * helixRadius, y, Math.sin(angle) * helixRadius);
       dnaGroup.add(p1);
-      leftStrand.push({ mesh: p1, origY: y });
+      leftStrand.push({ mesh: p1, origY: y, idx: i });
 
-      const p2 = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), cyanMat);
+      const p2 = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), cyanMat);
       p2.position.set(Math.cos(angle + Math.PI) * helixRadius, y, Math.sin(angle + Math.PI) * helixRadius);
       dnaGroup.add(p2);
-      rightStrand.push({ mesh: p2, origY: y });
+      rightStrand.push({ mesh: p2, origY: y, idx: i });
 
-      // Base pairs (Rungs)
-      const rungGeo = new THREE.CylinderGeometry(0.1, 0.1, helixRadius * 2, 8);
-      const rung = new THREE.Mesh(rungGeo, (i >= 13 && i <= 17) ? redMat : new THREE.MeshPhongMaterial({ color: 0xffffff }));
+      // Base pairs (rungs)
+      const isTargetArea = (i >= 14 && i <= 17);
+      const rungGeo = new THREE.CylinderGeometry(0.08, 0.08, helixRadius * 2, 8);
+      const rung = new THREE.Mesh(rungGeo, isTargetArea ? cutMat : new THREE.MeshPhongMaterial({ color: 0xffffff }));
       rung.position.set(0, y, 0);
       rung.rotation.z = Math.PI / 2;
       rung.rotation.y = -angle;
       dnaGroup.add(rung);
-      rungs.push({ mesh: rung, index: i });
+      rungs.push({ mesh: rung, idx: i });
     }
     scene.add(dnaGroup);
 
-    // 3. Build Cas9 Enzyme Body
-    const cas9Mat = new THREE.MeshPhongMaterial({ color: 0x9900ff, transparent: true, opacity: 0.65 });
-    const cas9 = new THREE.Mesh(new THREE.SphereGeometry(5.5, 32, 32), cas9Mat);
-    cas9.scale.set(1.4, 1, 1);
+    // 3. Cas9 Enclosure Body
+    const cas9Mat = new THREE.MeshPhongMaterial({ color: 0x8000ff, transparent: true, opacity: 0.5 });
+    const cas9 = new THREE.Mesh(new THREE.SphereGeometry(5.8, 32, 32), cas9Mat);
+    cas9.scale.set(1.3, 0.9, 1);
     scene.add(cas9);
 
-    // 4. Animation Controls
-    let isCut = false;
-    function triggerCut() {
-      isCut = true;
-      document.getElementById('status').innerText = "STATUS: CLEAVAGE COMPLETE!";
-      document.getElementById('status').style.color = "#ff0055";
-      document.getElementById('action-btn').style.display = "none";
+    // 4. State Machine Engine
+    let phase = 0; // 0 = bound, 1 = cut, 2 = repaired
+    let insertGeneGroup = new THREE.Group();
+
+    function nextPhase() {
+      const statusEl = document.getElementById('status');
+      const btnEl = document.getElementById('action-btn');
+
+      if (phase === 0) {
+        // TRIGGER CUT
+        phase = 1;
+        statusEl.innerText = "STEP 2: DOUBLE-STRAND BREAK (CLEAVAGE COMPLETE)";
+        statusEl.style.color = "#ff0055";
+        btnEl.innerText = "2. REPAIR DNA (INSERT NEW GENE)";
+        btnEl.style.background = "#00ff66";
+      } else if (phase === 1) {
+        // TRIGGER REPAIR
+        phase = 2;
+        statusEl.innerText = "STEP 3: GENE INSERTION & REPAIR COMPLETE!";
+        statusEl.style.color = "#00ff66";
+        btnEl.style.display = "none";
+        cas9Mat.opacity = 0.15; // Fade out Cas9 to highlight structural edit
+
+        // Build Green Repair Insertion Piece
+        const patchGeo = new THREE.CylinderGeometry(0.4, 0.4, 3, 16);
+        const patch = new THREE.Mesh(patchGeo, repairMat);
+        patch.position.set(0, 0, 0);
+        insertGeneGroup.add(patch);
+        scene.add(insertGeneGroup);
+      }
     }
 
-    // Render Loop
+    // Render / Animation Loop
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
 
-      if (!isCut) {
+      if (phase === 0) {
+        // Gentle rotation during scanning phase
         dnaGroup.rotation.y += 0.005;
-      } else {
-        // Break DNA apart at cut site
-        leftStrand.forEach((pt, idx) => {
-          if (idx >= 15) pt.mesh.position.y += 0.05;
-          else pt.mesh.position.y -= 0.05;
+      } else if (phase === 1) {
+        // Cleavage: Separate top and bottom DNA fragments
+        leftStrand.forEach(p => {
+          if (p.idx >= 16) p.mesh.position.y = p.origY + 1.8;
+          else p.mesh.position.y = p.origY - 1.8;
         });
-        rightStrand.forEach((pt, idx) => {
-          if (idx >= 15) pt.mesh.position.y += 0.05;
-          else pt.mesh.position.y -= 0.05;
+        rightStrand.forEach(p => {
+          if (p.idx >= 16) p.mesh.position.y = p.origY + 1.8;
+          else p.mesh.position.y = p.origY - 1.8;
         });
         rungs.forEach(r => {
-          if (r.index >= 13 && r.index <= 17) r.mesh.scale.x *= 0.95; // Dissolve target cut site
+          if (r.idx >= 14 && r.idx <= 17) {
+            r.mesh.scale.x = Math.max(0.01, r.mesh.scale.x * 0.92); // Shrink/dissolve target site
+          } else if (r.idx >= 16) {
+            r.mesh.position.y = ((r.idx / numPairs) * helixHeight - helixHeight / 2) + 1.8;
+          } else {
+            r.mesh.position.y = ((r.idx / numPairs) * helixHeight - helixHeight / 2) - 1.8;
+          }
         });
+      } else if (phase === 2) {
+        // Repair: Pull fragments back together around green repair gene
+        leftStrand.forEach(p => {
+          p.mesh.position.y += (p.origY - p.mesh.position.y) * 0.05;
+        });
+        rightStrand.forEach(p => {
+          p.mesh.position.y += (p.origY - p.mesh.position.y) * 0.05;
+        });
+        rungs.forEach(r => {
+          if (r.idx >= 14 && r.idx <= 17) {
+            r.mesh.material = repairMat; // Turn cut zone green
+            r.mesh.scale.x += (1 - r.mesh.scale.x) * 0.05;
+          }
+          const targetY = (r.idx / numPairs) * helixHeight - helixHeight / 2;
+          r.mesh.position.y += (targetY - r.mesh.position.y) * 0.05;
+        });
+        dnaGroup.rotation.y += 0.008; // Resume rotation once fixed
       }
 
       renderer.render(scene, camera);
